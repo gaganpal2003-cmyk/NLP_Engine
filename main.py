@@ -175,6 +175,7 @@ class LLMConfigRequest(BaseModel):
 # API Routes: Chatbot & Queries (Secured by Client API Key)
 # ---------------------------------------------------------------------
 @app.post("/api/chat", response_model=ChatResponse, tags=["Chatbot"])
+@app.post("/api/v1/chat", response_model=ChatResponse, tags=["Chatbot"])
 def chat(request: ChatRequest, tenant: TenantConfig = Depends(get_current_tenant)):
     """
     Main Chatbot endpoint for Web Dashboard.
@@ -191,6 +192,7 @@ def chat(request: ChatRequest, tenant: TenantConfig = Depends(get_current_tenant
     return result
 
 @app.post("/api/chat/stream", tags=["Chatbot"])
+@app.post("/api/v1/chat/stream", tags=["Chatbot"])
 def chat_stream(request: ChatRequest, tenant: TenantConfig = Depends(get_current_tenant)):
     """
     Server-Sent Events (SSE) streaming endpoint for live typewriter effect in web dashboard.
@@ -225,6 +227,7 @@ def chat_stream(request: ChatRequest, tenant: TenantConfig = Depends(get_current
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.post("/api/query/raw", response_model=RawQueryResponse, tags=["Database"])
+@app.post("/api/v1/query/raw", response_model=RawQueryResponse, tags=["Database"])
 def execute_raw_sql(request: RawQueryRequest, tenant: TenantConfig = Depends(get_current_tenant)):
     """
     Executes a direct read-only SQL query against the client's database with AST security validation.
@@ -254,6 +257,7 @@ def execute_raw_sql(request: RawQueryRequest, tenant: TenantConfig = Depends(get
 
 
 @app.get("/api/database/schema", tags=["Database"])
+@app.get("/api/v1/database/schema", tags=["Database"])
 def get_database_schema(tenant: TenantConfig = Depends(get_current_tenant)):
     """Returns the introspected database schema for the client's mapped database."""
     return schema_inspector.get_schema_dict(url=tenant.database_url)
@@ -327,6 +331,7 @@ def connect_database(req: DatabaseConnectRequest):
     }
 
 @app.get("/api/auth/verify", tags=["Authentication"])
+@app.get("/api/v1/auth/verify", tags=["Authentication"])
 def verify_api_key(tenant: TenantConfig = Depends(get_current_tenant)):
     """Verifies that an API Key is valid and returns its client profile and database connection status."""
     db_ok, db_err = db_connector.test_connection(tenant.database_url)
@@ -445,6 +450,8 @@ def register_client_tenant(req: ClientRegistrationRequest, request: Request):
 # System Health & Runtime Config
 # ---------------------------------------------------------------------
 @app.get("/api/health", tags=["System"])
+@app.get("/api/v1/health", tags=["System"])
+@app.get("/health", tags=["System"])
 def health_check(request: Request, api_key: Optional[str] = Query(None)):
     """Health check endpoint to verify server, database connection, and LLM status."""
     active_url = None
