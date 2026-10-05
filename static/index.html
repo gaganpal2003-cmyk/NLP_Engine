@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Surveillance & Alert AI Analytics Engine</title>
+  <meta name="description" content="AI Chatbot & Natural Language Query API Engine for Surveillance and Alert Dashboards">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <!-- Chart.js for data visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Left Navigation / Database Info Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <circle cx="12" cy="11" r="3"/>
+          </svg>
+        </div>
+        <div>
+          <h2>NLP Engine</h2>
+          <span class="version-tag">v1.0 • Web API</span>
+        </div>
+      </div>
+
+      <!-- Live Connection Status Card -->
+      <div class="glass-card status-card">
+        <div class="status-header">
+          <span class="status-indicator online" id="statusDot"></span>
+          <span class="status-title" id="statusTitle">Connecting...</span>
+        </div>
+        <div class="status-details">
+          <div class="detail-row">
+            <span class="label">Engine</span>
+            <span class="value" id="dbDialect">-</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">Tables</span>
+            <span class="value" id="dbTablesCount">-</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">LLM</span>
+            <span class="value" id="llmStatusBadge">-</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="sidebar-actions">
+        <button class="btn btn-secondary" id="openDbModalBtn">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          Switch Database
+        </button>
+        <button class="btn btn-secondary" id="openLlmModalBtn">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/></svg>
+          Configure LLM
+        </button>
+        <a href="/docs" target="_blank" class="btn btn-outline">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Swagger Docs
+        </a>
+      </div>
+
+      <!-- Table Schema List -->
+      <div class="schema-section">
+        <h3>Detected Tables</h3>
+        <div class="table-list" id="tableList">
+          <div class="table-item-skeleton">Loading tables...</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Chat Workspace -->
+    <main class="chat-workspace">
+      <!-- Header -->
+      <header class="chat-header">
+        <div class="header-info">
+          <h1>Detection & Alert AI Assistant</h1>
+          <p>Ask anything about alerts, detections, cameras, and system analytics</p>
+        </div>
+        <div class="header-badges">
+          <span class="badge badge-pulse">API Ready for Web Team</span>
+        </div>
+      </header>
+
+      <!-- Message Flow Container -->
+      <div class="chat-stream" id="chatStream">
+        <!-- Initial Welcome Message -->
+        <div class="message-row assistant">
+          <div class="avatar">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div class="message-content">
+            <div class="bubble">
+              <p>👋 <strong>Welcome to the Surveillance & Alert Analytics Assistant!</strong></p>
+              <p>I translate your natural language questions into safe, optimized SQL queries, fetch live data from your database, and summarize the results with charts and tables.</p>
+              <p>Try clicking any of the quick queries below or type your own question!</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Question Prompt Chips -->
+      <div class="quick-prompts-bar">
+        <span class="prompt-label">Quick Prompts:</span>
+        <button class="chip" data-prompt="How many PPE detections?">🦺 Total PPE Detections</button>
+        <button class="chip" data-prompt="Show missing PPE breakdown">📊 Missing PPE Breakdown</button>
+        <button class="chip" data-prompt="Show recent PPE detections">📋 Recent PPE Records</button>
+        <button class="chip" data-prompt="How many fire smoke alerts?">🔥 Fire & Smoke (27)</button>
+        <button class="chip" data-prompt="How many mobile usage detections?">📱 Mobile Usage (52)</button>
+        <button class="chip" data-prompt="How many person fall events?">🚶 Person Fall (45)</button>
+        <button class="chip" data-prompt="How many cameras are there?">📹 Cameras (12)</button>
+      </div>
+
+      <!-- Input Bar -->
+      <div class="chat-input-wrapper">
+        <form id="chatForm" class="chat-input-form">
+          <div class="input-container">
+            <input 
+              type="text" 
+              id="userInput" 
+              placeholder="Ask about detections, alert counts, camera status, or logs..." 
+              autocomplete="off"
+              required
+            />
+            <button type="submit" id="sendBtn" class="btn-send" title="Send Message">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13"/>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+              </svg>
+            </button>
+          </div>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <!-- Switch Database Modal -->
+  <div class="modal-backdrop" id="dbModal">
+    <div class="modal-content glass-card">
+      <div class="modal-header">
+        <h3>Connect Database</h3>
+        <button class="modal-close" id="closeDbModal">&times;</button>
+      </div>
+      <p class="modal-desc">Configure the database for the NLP Engine to query (MySQL, PostgreSQL, or SQLite).</p>
+      
+      <form id="dbConnectForm">
+        <div class="form-group">
+          <label for="dbUrlInput">Direct Connection String (Recommended)</label>
+          <input 
+            type="text" 
+            id="dbUrlInput" 
+            placeholder="e.g. mysql+pymysql://root:pass@localhost:3306/frs_db" 
+            class="form-input"
+          />
+          <small class="helper-text">Supports <code>mysql+pymysql://</code>, <code>postgresql://</code>, <code>sqlite:///</code></small>
+        </div>
+
+        <div class="form-divider"><span>OR Individual Parameters</span></div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="dbTypeSelect">Type</label>
+            <select id="dbTypeSelect" class="form-input">
+              <option value="mysql">MySQL</option>
+              <option value="postgresql">PostgreSQL</option>
+              <option value="sqlite">SQLite</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="dbHostInput">Host</label>
+            <input type="text" id="dbHostInput" value="localhost" class="form-input"/>
+          </div>
+          <div class="form-group">
+            <label for="dbPortInput">Port</label>
+            <input type="number" id="dbPortInput" value="3306" class="form-input"/>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="dbUserInput">User</label>
+            <input type="text" id="dbUserInput" value="root" class="form-input"/>
+          </div>
+          <div class="form-group">
+            <label for="dbPassInput">Password</label>
+            <input type="password" id="dbPassInput" class="form-input"/>
+          </div>
+          <div class="form-group">
+            <label for="dbNameInput">Database Name</label>
+            <input type="text" id="dbNameInput" value="detection_db" class="form-input"/>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="cancelDbBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="saveDbBtn">Connect & Inspect Schema</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Configure LLM Modal -->
+  <div class="modal-backdrop" id="llmModal">
+    <div class="modal-content glass-card">
+      <div class="modal-header">
+        <h3>Configure LLM Provider</h3>
+        <button class="modal-close" id="closeLlmModal">&times;</button>
+      </div>
+      <p class="modal-desc">Connect OpenAI, Gemini, Ollama (Local), DeepSeek, or Groq for advanced natural language query comprehension.</p>
+      
+      <form id="llmConfigForm">
+        <div class="form-group">
+          <label for="llmApiKeyInput">API Key</label>
+          <input type="password" id="llmApiKeyInput" placeholder="sk-..." class="form-input" required/>
+          <small class="helper-text">For local Ollama, you can type <code>ollama</code></small>
+        </div>
+
+        <div class="form-group">
+          <label for="llmBaseUrlInput">Base URL</label>
+          <input type="text" id="llmBaseUrlInput" value="https://api.openai.com/v1" class="form-input"/>
+          <small class="helper-text">Ollama: <code>http://localhost:11434/v1</code> | Gemini: <code>https://generativelanguage.googleapis.com/v1beta/openai/</code></small>
+        </div>
+
+        <div class="form-group">
+          <label for="llmModelInput">Model Name</label>
+          <input type="text" id="llmModelInput" value="gpt-4o-mini" class="form-input"/>
+          <small class="helper-text">e.g. <code>gpt-4o-mini</code>, <code>gemini-1.5-flash</code>, <code>llama3:8b</code></small>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="cancelLlmBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save LLM Configuration</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
