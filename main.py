@@ -127,17 +127,32 @@ def require_admin(
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User's natural language question", example="How many critical alerts occurred today?")
     session_id: Optional[str] = Field(None, description="Optional session or conversation ID")
+    app_id: Optional[str] = Field(None, description="Optional application profile identifier")
+    application: Optional[str] = Field(None, description="Optional application name")
+    context: Optional[str] = Field(None, description="Optional contextual domain scope")
+
+    class Config:
+        extra = "allow"
 
 class ChatResponse(BaseModel):
+    status: str = "success"
     answer: str
     sql_query: Optional[str] = None
     data: List[Dict[str, Any]] = []
     columns: List[str] = []
     row_count: int = 0
     execution_time_ms: float = 0.0
+    chart: Optional[Dict[str, Any]] = None
     chart_config: Optional[Dict[str, Any]] = None
     session_id: Optional[str] = None
     client_name: Optional[str] = None
+    applications: Optional[List[str]] = None
+    clarification_prompt: Optional[str] = None
+    neutralized: Optional[bool] = None
+    security_defense: Optional[str] = None
+
+    class Config:
+        extra = "allow"
 
 class RawQueryRequest(BaseModel):
     query: str = Field(..., description="Read-only SQL query to execute", example="SELECT * FROM alerts LIMIT 10")
@@ -172,6 +187,51 @@ class LLMConfigRequest(BaseModel):
     model: Optional[str] = Field("gpt-4o-mini", description="Model name (e.g. gpt-4o-mini, gemini-1.5-flash, llama3:8b)")
 
 # ---------------------------------------------------------------------
+# API Routes: Applications & Metadata Registry
+# ---------------------------------------------------------------------
+@app.get("/api/applications", tags=["Metadata"])
+@app.get("/api/v1/applications", tags=["Metadata"])
+def get_applications(tenant: TenantConfig = Depends(get_current_tenant)):
+    """
+    Metadata Registry: Verifies API Key authorization and returns loaded application profiles.
+    Used by web dashboards to discover supported analytical engines (Surveillance, PPE, FRS).
+    """
+    client_title = tenant.client_name or "Surveillance & Alert Analytics"
+    apps = [
+        {
+            "id": "surveillance",
+            "app_id": "surveillance",
+            "name": client_title,
+            "description": tenant.description or "Live camera feeds, detections, and security alert analytics",
+            "status": "active",
+            "tables": ["cameras", "alerts", "detections"]
+        },
+        {
+            "id": "ppe_detection",
+            "app_id": "ppe_detection",
+            "name": "PPE & Safety Violation Engine",
+            "description": "Safety equipment compliance, helmet, vest, and violation events",
+            "status": "active",
+            "tables": ["bothra_ppe_detection_detection"]
+        },
+        {
+            "id": "frs_access",
+            "app_id": "frs_access",
+            "name": "Facial Recognition & Access Control",
+            "description": "Access control, person attendance, and entrance logs",
+            "status": "active",
+            "tables": ["frs_attendance", "frs_persons"]
+        }
+    ]
+    return {
+        "status": "success",
+        "count": len(apps),
+        "applications": apps,
+        "data": apps,
+        "client_name": tenant.client_name,
+    }
+
+# ---------------------------------------------------------------------
 # API Routes: Chatbot & Queries (Secured by Client API Key)
 # ---------------------------------------------------------------------
 @app.post("/api/chat", response_model=ChatResponse, tags=["Chatbot"])
@@ -186,9 +246,17 @@ def chat(request: ChatRequest, tenant: TenantConfig = Depends(get_current_tenant
         user_question=request.message,
         db_url=tenant.database_url,
         max_rows=tenant.max_rows,
+        app_id=request.app_id or request.application,
+        context=request.context,
     )
     result["session_id"] = request.session_id
     result["client_name"] = tenant.client_name
+    if "chart" not in result:
+        result["chart"] = result.get("chart_config")
+    if "chart_config" not in result:
+        result["chart_config"] = result.get("chart")
+    if "status" not in result:
+        result["status"] = "success"
     return result
 
 @app.post("/api/chat/stream", tags=["Chatbot"])

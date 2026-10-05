@@ -25,6 +25,14 @@ class SQLValidator:
             return False, "", "Empty SQL query."
 
         clean_sql = query.strip()
+        # Clean accidental markdown code fences or 'sql' prefix
+        clean_sql = re.sub(r"^```(?:sql)?\s*", "", clean_sql, flags=re.IGNORECASE).strip()
+        clean_sql = re.sub(r"```\s*$", "", clean_sql).strip()
+        if clean_sql.lower().startswith("sql\n") or clean_sql.lower().startswith("sql "):
+            clean_sql = clean_sql[3:].strip()
+        if clean_sql.startswith("`") and clean_sql.endswith("`"):
+            clean_sql = clean_sql.strip("`").strip()
+
         # Remove trailing semicolon
         clean_sql = re.sub(r";+\s*$", "", clean_sql)
 

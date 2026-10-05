@@ -255,6 +255,7 @@ Rules:
 5. If table contains image or binary BLOB columns (snapshot, imagedata, photo, etc.), DO NOT SELECT THEM.
 6. When calculating counts or aggregates, use descriptive column aliases (e.g. SELECT COUNT(*) AS total_cameras FROM camera).
 7. CRITICAL: If the user question is gibberish, random letters/keystrokes (e.g. 'dfgerg', 'gerg', 'asdf', 'xyz'), conversational greetings (e.g. 'hi', 'hello', 'how are you', 'thank you'), or completely unrelated to querying the database, DO NOT invent a query. Return ONLY the word: NONE
+8. When the question asks for 'grouping', 'breakdown', 'distribution', 'by status', 'by location', 'by camera', or 'by severity', ALWAYS generate a GROUP BY query with COUNT(*) (e.g. SELECT status, COUNT(*) AS count FROM cameras GROUP BY status).
 """
                 user_prompt = f"""Database Schema:
 {schema_prompt}
@@ -270,6 +271,11 @@ User Question: {normalized_q} (Original: {question})
                 if extracted_sql:
                     if extracted_sql.strip().upper() in ["NONE", "SELECT 1", "SELECT 1;", "SELECT 1 AS RESULT", "SELECT 1 AS RESULT;"]:
                         return ""
+                    # If grouping was requested but LLM returned a plain list without GROUP BY, use heuristic GROUP BY
+                    if any(k in question.lower() for k in ["group", "grouping", "breakdown", "distribution"]) and "GROUP BY" not in extracted_sql.upper():
+                        heuristic_grp = self._generate_with_heuristics(normalized_q, db_url=db_url, raw_q=question, target_date=target_date)
+                        if heuristic_grp and "GROUP BY" in heuristic_grp.upper():
+                            return heuristic_grp
                     return extracted_sql
                 elif "NONE" in llm_response.strip().upper():
                     return ""
@@ -287,11 +293,18 @@ User Question: {normalized_q} (Original: {question})
         m = re.search(r"```(?:sql)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
         if m:
             candidate = m.group(1).strip()
-            if candidate.upper() == "NONE" or candidate.upper() in ["SELECT 1", "SELECT 1;", "SELECT 1 AS RESULT", "SELECT 1 AS RESULT;"]:
-                return ""
-            return candidate
-        lines = [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("--")]
-        candidate = " ".join(lines)
+        else:
+            lines = [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("--")]
+            candidate = " ".join(lines)
+
+        # Strip accidental markdown code fence or 'sql' language specifier
+        candidate = re.sub(r"^```(?:sql)?\s*", "", candidate, flags=re.IGNORECASE).strip()
+        candidate = re.sub(r"```\s*$", "", candidate).strip()
+        if candidate.lower().startswith("sql\n") or candidate.lower().startswith("sql "):
+            candidate = candidate[3:].strip()
+        if candidate.startswith("`") and candidate.endswith("`"):
+            candidate = candidate.strip("`").strip()
+
         if candidate.upper().startswith("SELECT") or candidate.upper().startswith("WITH"):
             if candidate.upper() in ["SELECT 1", "SELECT 1;", "SELECT 1 AS RESULT", "SELECT 1 AS RESULT;"]:
                 return ""
@@ -392,6 +405,7 @@ User Question: {normalized_q} (Original: {question})
 
         # Candidate table finders
         cam_table = self._find_table(all_table_names, ["camera", "bothra_ppe_detection_camera", "cameras"])
+        alert_table = self._find_table(all_table_names, ["alerts", "alert", "cairo_alerts", "bothra_alerts"])
         ppe_table = self._find_table(all_table_names, ["ppe_detection", "bothra_ppe_detection_detection", "ppe"])
         det_table = self._find_table(all_table_names, ["detection", "ppe_detection", "bothra_ppe_detection_detection", "detections"])
         fire_table = self._find_table(all_table_names, ["fire_smoke", "fire", "smoke"])
@@ -432,6 +446,8 @@ User Question: {normalized_q} (Original: {question})
                 target_single = anpr_table
             elif "attendance" in q and att_table:
                 target_single = att_table
+            elif "alert" in q and alert_table:
+                target_single = alert_table
 
             if target_single:
                 d_col = get_table_date_col(table_dict.get(target_single))
@@ -452,7 +468,7 @@ User Question: {normalized_q} (Original: {question})
         # 1. Multi-Feature Summary (With or Without Specific Date Filter)
         # -------------------------------------------------------------
         is_general_query = not any(k in q for k in [
-            "camera", "cctv", "client", "attendance", "employee",
+            "camera", "cctv", "client", "attendance", "employee", "alert",
             "ppe", "helmet", "vest", "safety", "fire", "smoke",
             "mobile", "phone", "fall", "anpr", "vehicle", "tamper", "tempering"
         ])
@@ -467,15 +483,54 @@ User Question: {normalized_q} (Original: {question})
                 return " UNION ALL ".join(summary_sub)
 
         # -------------------------------------------------------------
-        # 2. Cameras (camera, cctv, cams, status)
+        # 2. Cameras (camera, cctv, cams, grouping & status)
         # -------------------------------------------------------------
-        if ("camera" in q or "cctv" in q) and cam_table and not any(k in q for k in ["ppe", "helmet", "vest"]):
+        if ("camera" in q or "cctv" in q or "cam" in q) and cam_table and not any(k in q for k in ["ppe", "helmet", "vest"]):
             cols = get_display_columns(cam_table)
+            t_info = table_dict.get(cam_table.lower(), {})
+            cam_cols = [c["name"].lower() for c in t_info.get("columns", [])]
+
+            # 2a. Grouped Breakdown for cameras / camera grouping
+            if is_breakdown or any(k in q for k in ["group", "grouping", "grouped", "breakdown", "by status", "by location", "distribution"]):
+                if "alert" in q and alert_table:
+                    return f"SELECT camera_id, count(*) AS alert_count FROM {alert_table} GROUP BY camera_id ORDER BY alert_count DESC LIMIT 10"
+                if "detection" in q and det_table:
+                    return f"SELECT camera_id, count(*) AS detection_count FROM {det_table} GROUP BY camera_id ORDER BY detection_count DESC LIMIT 10"
+                if "location" in q and "location" in cam_cols:
+                    return f"SELECT location, count(*) AS camera_count FROM {cam_table} GROUP BY location ORDER BY camera_count DESC LIMIT 10"
+                if "status" in cam_cols:
+                    return f"SELECT status, count(*) AS camera_count FROM {cam_table} GROUP BY status ORDER BY camera_count DESC"
+                return f"SELECT id, name, status FROM {cam_table} LIMIT 25"
+
             if any(k in q for k in ["offline", "inactive", "down", "not working", "disconnected"]):
                 return f"SELECT {cols} FROM {cam_table} WHERE status != 'online' AND status != '1'"
             if is_count:
                 return f"SELECT count(*) AS total_cameras FROM {cam_table}"
             return f"SELECT {cols} FROM {cam_table} LIMIT 25"
+
+        # -------------------------------------------------------------
+        # 2b. Alerts & Security Incidents
+        # -------------------------------------------------------------
+        if ("alert" in q or "security" in q) and alert_table:
+            t_info = table_dict.get(alert_table.lower(), {})
+            alert_cols = [c["name"].lower() for c in t_info.get("columns", [])]
+            d_col = get_table_date_col(t_info)
+            where = build_date_where_clause(d_col, target_date, is_today, is_yesterday, is_week, is_month, dialect)
+            where_clause = f"WHERE {where} " if where else ""
+
+            # Grouped Breakdown for alerts
+            if is_breakdown or any(k in q for k in ["group", "grouping", "grouped", "breakdown", "distribution"]):
+                if any(k in q for k in ["camera", "cam"]) and "camera_id" in alert_cols:
+                    return f"SELECT camera_id, count(*) AS alert_count FROM {alert_table} {where_clause}GROUP BY camera_id ORDER BY alert_count DESC LIMIT 10"
+                if any(k in q for k in ["type", "alert_type"]) and "alert_type" in alert_cols:
+                    return f"SELECT alert_type, count(*) AS alert_count FROM {alert_table} {where_clause}GROUP BY alert_type ORDER BY alert_count DESC"
+                if "severity" in alert_cols:
+                    return f"SELECT severity, count(*) AS alert_count FROM {alert_table} {where_clause}GROUP BY severity ORDER BY alert_count DESC"
+
+            if is_count:
+                return f"SELECT count(*) AS total_alerts FROM {alert_table} {where_clause}".strip()
+            cols = get_display_columns(alert_table)
+            return f"SELECT {cols} FROM {alert_table} {where_clause}ORDER BY id DESC LIMIT 20"
 
         # -------------------------------------------------------------
         # 3. PPE & General Detections
