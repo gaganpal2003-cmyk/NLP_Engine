@@ -307,6 +307,11 @@ class ChatEngine:
         if not rows or len(rows) > 50:
             return None
 
+        q_lower = question.lower()
+        forced_bar = any(k in q_lower for k in ["bar", "bar graph", "bar chart", "histogram"])
+        forced_pie = any(k in q_lower for k in ["pie", "doughnut", "donut", "pie chart"])
+        forced_line = any(k in q_lower for k in ["line", "trend", "timeline", "date", "daily", "day"])
+
         # Case A: Exactly 2 columns where one is category and other is numeric
         if len(columns) == 2 and len(rows) >= 1:
             col0, col1 = columns[0], columns[1]
@@ -316,7 +321,14 @@ class ChatEngine:
             if isinstance(val0, str) and (isinstance(val1, (int, float)) or str(val1).isdigit()):
                 labels = [str(r.get(col0)) for r in rows]
                 values = [float(r.get(col1) or 0) for r in rows]
-                chart_type = "doughnut" if "severity" in col0.lower() or len(rows) <= 5 else "bar"
+                if forced_bar:
+                    chart_type = "bar"
+                elif forced_pie:
+                    chart_type = "doughnut"
+                elif forced_line:
+                    chart_type = "line"
+                else:
+                    chart_type = "doughnut" if "severity" in col0.lower() or len(rows) <= 4 else "bar"
                 return {
                     "type": chart_type,
                     "title": f"{col1.replace('_', ' ').title()} by {col0.replace('_', ' ').title()}",

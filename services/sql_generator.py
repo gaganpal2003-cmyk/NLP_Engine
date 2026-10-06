@@ -70,6 +70,11 @@ DOMAIN_SYNONYMS: Dict[str, str] = {
 
 # Multi-word regex phrase normalizations
 PHRASE_REPLACEMENTS = [
+    (r"\b(bar\s*graph|bar\s*chart|in\s+bar\s+graph|in\s+bar\s+chart)\b", "bar graph"),
+    (r"\b(pie\s*chart|pie\s*graph)\b", "pie chart"),
+    (r"\b(line\s*chart|line\s*graph)\b", "line graph"),
+    (r"\b(visuali[sz]e(\s+data)?(\s+in\s+graphs?)?)\b", "bar graph"),
+    (r"\b(download|export|generate)\s+(the\s+)?report\b", "download report"),
     (r"\b(hw|how|homany|howmny)\s+(mny|meny|mani|many)\b", "how many"),
     (r"\bhowmny\b", "how many"),
     (r"\bhow\s+much\b", "how many"),
@@ -112,6 +117,13 @@ STEM_MAPPINGS = [
 ]
 
 CORRECTION_TARGETS = [
+    "report",
+    "visualize",
+    "plot",
+    "pie",
+    "bar",
+    "chart",
+    "graph",
     "how", "many", "count", "total", "show", "give", "list", "details", "find", "get", "status",
     "camera", "ppe", "helmet", "vest", "safety", "detection", "alert", "violation",
     "fire", "smoke", "mobile", "phone", "usage", "fall", "person", "vehicle", "anpr",
@@ -255,7 +267,8 @@ Rules:
 5. If table contains image or binary BLOB columns (snapshot, imagedata, photo, etc.), DO NOT SELECT THEM.
 6. When calculating counts or aggregates, use descriptive column aliases (e.g. SELECT COUNT(*) AS total_cameras FROM camera).
 7. CRITICAL: If the user question is gibberish, random letters/keystrokes (e.g. 'dfgerg', 'gerg', 'asdf', 'xyz'), conversational greetings (e.g. 'hi', 'hello', 'how are you', 'thank you'), or completely unrelated to querying the database, DO NOT invent a query. Return ONLY the word: NONE
-8. When the question asks for 'grouping', 'breakdown', 'distribution', 'by status', 'by location', 'by camera', or 'by severity', ALWAYS generate a GROUP BY query with COUNT(*) (e.g. SELECT status, COUNT(*) AS count FROM cameras GROUP BY status).
+8. When the question asks for 'bar graph', 'graph', 'chart', 'pie chart', 'visualize', 'grouping', 'breakdown', 'distribution', 'by status', 'by location', 'by camera', or 'by severity', ALWAYS generate an aggregated GROUP BY query with COUNT(*) (e.g. SELECT camera_id, COUNT(*) AS total_detections FROM detections GROUP BY camera_id ORDER BY total_detections DESC LIMIT 10, or SELECT severity, COUNT(*) AS total_alerts FROM alerts GROUP BY severity). If the user asks for 'all info in bar graph' or 'visualize data in graphs', group detections by camera or alerts by severity. NEVER say you cannot generate graphs.
+9. When the question asks to 'download report', 'export report', or 'generate report', generate a SELECT query retrieving the recent 50 records (e.g. SELECT * FROM detections ORDER BY timestamp DESC LIMIT 50).
 """
                 user_prompt = f"""Database Schema:
 {schema_prompt}
@@ -402,6 +415,8 @@ User Question: {normalized_q} (Original: {question})
         # Check intent types
         is_count = any(k in q for k in ["how many", "count", "number of", "total", "amount", "are there", "is there", "exist", "sum", "kitne"])
         is_breakdown = any(k in q for k in ["breakdown", "by type", "by camera", "by severity", "types of", "distribution", "category", "categories", "group by"])
+        is_chart_intent = any(k in q for k in ["bar graph", "graph", "chart", "bar", "pie", "pie chart", "visualize", "plot", "histogram", "trend", "doughnut"])
+        is_report_intent = any(k in q for k in ["download report", "export report", "download csv", "download excel", "download pdf", "generate report", "report"])
 
         # Candidate table finders
         cam_table = self._find_table(all_table_names, ["camera", "bothra_ppe_detection_camera", "cameras"])
@@ -429,6 +444,39 @@ User Question: {normalized_q} (Original: {question})
         ]
 
         # -------------------------------------------------------------
+                # -------------------------------------------------------------
+        # Chart & Graph Intent Handling (e.g. "all info in bar graph")
+        # -------------------------------------------------------------
+        if is_chart_intent or (is_breakdown and not is_count):
+            if det_table:
+                t_cols = [c["name"].lower() for c in table_dict.get(det_table.lower(), {}).get("columns", [])]
+                if "camera_id" in t_cols:
+                    return f"SELECT camera_id, count(*) AS total_detections FROM {det_table} GROUP BY camera_id ORDER BY total_detections DESC LIMIT 10"
+                elif "object_type" in t_cols:
+                    return f"SELECT object_type, count(*) AS total_detections FROM {det_table} GROUP BY object_type ORDER BY total_detections DESC LIMIT 10"
+                else:
+                    first_col = t_cols[1] if len(t_cols) > 1 else t_cols[0]
+                    return f"SELECT {first_col}, count(*) AS total_detections FROM {det_table} GROUP BY {first_col} ORDER BY total_detections DESC LIMIT 10"
+            elif alert_table:
+                t_cols = [c["name"].lower() for c in table_dict.get(alert_table.lower(), {}).get("columns", [])]
+                if "severity" in t_cols:
+                    return f"SELECT severity, count(*) AS alert_count FROM {alert_table} GROUP BY severity ORDER BY alert_count DESC"
+                elif "alert_type" in t_cols:
+                    return f"SELECT alert_type, count(*) AS alert_count FROM {alert_table} GROUP BY alert_type ORDER BY alert_count DESC"
+            elif cam_table:
+                return f"SELECT status, count(*) AS camera_count FROM {cam_table} GROUP BY status"
+
+        # -------------------------------------------------------------
+        # Report Intent Handling (e.g. "download report", "export report")
+        # -------------------------------------------------------------
+        if is_report_intent:
+            if det_table:
+                return f"SELECT * FROM {det_table} ORDER BY 1 DESC LIMIT 50"
+            elif alert_table:
+                return f"SELECT * FROM {alert_table} ORDER BY 1 DESC LIMIT 50"
+            elif cam_table:
+                return f"SELECT * FROM {cam_table} LIMIT 50"
+
         # 0. Date-Wise Trend / Timeline Grouping
         # -------------------------------------------------------------
         if is_date_wise:
