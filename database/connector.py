@@ -1,5 +1,6 @@
 from __future__ import annotations
 import time
+from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime, date, timedelta
 from decimal import Decimal
@@ -30,10 +31,25 @@ class DatabaseConnector:
         self._override_url = val
 
     def _normalize_url(self, url: str) -> str:
-        """Ensures MySQL uses the PyMySQL driver."""
+        """Ensures MySQL uses the PyMySQL driver and SQLite paths resolve to engine root."""
         u = url.strip()
         if u.startswith("mysql://"):
             u = u.replace("mysql://", "mysql+pymysql://", 1)
+        
+        # Auto-encode unencoded $ in MySQL password
+        if "mysql" in u and ":" in u and "@" in u:
+            u = re.sub(r':([^/@:]+)\$([^/@:]*)@', r':%24@', u)
+
+        # Resolve relative SQLite paths relative to NLP_ENGINE root directory
+        if "sqlite:///" in u:
+            raw_path = u.replace("sqlite:///", "")
+            if raw_path.startswith("./"):
+                raw_path = raw_path[2:]
+            path_obj = Path(raw_path)
+            if not path_obj.is_absolute():
+                base_dir = Path(__file__).resolve().parent.parent
+                abs_path = (base_dir / path_obj).resolve()
+                u = f"sqlite:///{abs_path.as_posix()}"
         return u
 
     def get_engine(self, url: Optional[str] = None) -> sa.engine.Engine:
